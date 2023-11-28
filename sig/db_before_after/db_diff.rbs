@@ -1,0 +1,31 @@
+module DbBeforeAfter
+  class DbDiff
+    SELECT_TABLES: String
+
+    @columns_stmt: Mysql2::Statement
+    @db_conn: Mysql2::Client
+    @db_info: Hash[String, String]
+    @file: File
+    @no_diff: bool
+    @tables_stmt: Mysql2::Statement
+
+    def self.execute: -> void
+
+    def db_conn: -> Mysql2::Client
+
+    def execute: -> void
+
+    def output_left: -> void
+
+    def output_right: -> void
+
+    def output_title: -> void
+
+    def read_db: -> Hash[String, Hash[String, untyped]]
+
+    def replace_code: -> String
+
+    def write_html: -> void
+    @tables_stmt: untyped
+  end
+end

@@ -1,0 +1,27 @@
+#!/usr/bin/env ruby
+
+require 'rubygems'
+require 'bundler/setup'
+require 'db_before_after'
+
+require 'optparse'
+opt = OptionParser.new
+
+db_info = {
+  host: '127.0.0.1',
+  port: 3306,
+  encoding: 'utf8',
+}
+_file_suffix = nil
+
+opt.on('-h VAL') {|v| db_info[:host] = v }
+opt.on('-P VAL') {|v| db_info[:port] = v }
+opt.on('-u VAL') {|v| db_info[:username] = v }
+opt.on('-p VAL') {|v| db_info[:password] = v }
+opt.on('-d VAL') {|v| db_info[:database] = v }
+opt.on('-e VAL') {|v| db_info[:encoding] = v }
+opt.on('-s VAL') {|v| _file_suffix = v }
+opt.parse!(ARGV)
+
+file_suffix = ARGV[0] || _file_suffix || 'db_diff.html'
+DbBeforeAfter::DbDiff.execute(file_suffix, db_info)
