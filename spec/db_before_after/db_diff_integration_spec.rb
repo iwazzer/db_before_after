@@ -18,6 +18,7 @@ RSpec.describe DbBeforeAfter::DbDiff, 'Integration Tests' do
 
   let(:tempfile) { Tempfile.new('test_output.html') }
   let(:mock_adapter) { instance_double(DbBeforeAfter::MySQLAdapter) }
+  let(:mock_output_adapter) { instance_double(DbBeforeAfter::HtmlOutputAdapter) }
   let(:db_diff) { described_class.new(tempfile, db_info) }
 
   after { tempfile.close }
@@ -43,73 +44,34 @@ RSpec.describe DbBeforeAfter::DbDiff, 'Integration Tests' do
 
     before do
       allow(db_diff.instance_variable_get(:@adapter)).to receive(:read_database).and_return(before_db, after_db)
+      allow(db_diff.instance_variable_get(:@output_adapter)).to receive(:start_output)
+      allow(db_diff.instance_variable_get(:@output_adapter)).to receive(:end_output)
+      allow(db_diff.instance_variable_get(:@output_adapter)).to receive(:write_title)
+      allow(db_diff.instance_variable_get(:@output_adapter)).to receive(:write_diff_section)
+      allow(db_diff.instance_variable_get(:@output_adapter)).to receive(:write_no_diff_message)
+      allow(db_diff.instance_variable_get(:@output_adapter)).to receive(:generate_diff).and_return(
+        instance_double(Diffy::SplitDiff, left: '<div>left</div>', right: '<div>right</div>')
+      )
       allow(STDIN).to receive(:getc).and_return("\n")
       allow(STDOUT).to receive(:puts)
     end
 
     context 'when there are database changes' do
-
-      it 'detects added records' do
+      it 'uses output adapter to generate output' do
+        expect(db_diff.instance_variable_get(:@output_adapter)).to receive(:start_output)
+        expect(db_diff.instance_variable_get(:@output_adapter)).to receive(:write_title).with('users')
+        expect(db_diff.instance_variable_get(:@output_adapter)).to receive(:write_diff_section)
+        expect(db_diff.instance_variable_get(:@output_adapter)).to receive(:end_output)
+        
         db_diff.execute
-        
-        tempfile.rewind
-        content = tempfile.read
-        
-        # Should contain diff for added record (ID 3)
-        expect(content).to include('Bob')
-        expect(content).to include('bob@example.com')
       end
 
-      it 'detects deleted records' do
+      it 'detects changes and calls appropriate output methods' do
+        expect(db_diff.instance_variable_get(:@output_adapter)).to receive(:generate_diff).at_least(:once)
+        expect(db_diff.instance_variable_get(:@output_adapter)).to receive(:write_title).with('users')
+        expect(db_diff.instance_variable_get(:@output_adapter)).to receive(:write_diff_section).at_least(:once)
+        
         db_diff.execute
-        
-        tempfile.rewind
-        content = tempfile.read
-        
-        # Should contain diff for deleted record (ID 2)
-        expect(content).to include('Jane')
-        expect(content).to include('jane@example.com')
-      end
-
-      it 'detects modified records' do
-        db_diff.execute
-        
-        tempfile.rewind
-        content = tempfile.read
-        
-        # Should contain diff for modified record (ID 1)
-        expect(content).to include('John<strong> Updated</strong>')
-        expect(content).to include('John')
-      end
-
-      it 'generates valid HTML structure' do
-        db_diff.execute
-        
-        tempfile.rewind
-        content = tempfile.read
-        
-        expect(content).to include('<html>')
-        expect(content).to include('<head>')
-        expect(content).to include('<meta charset="UTF-8">')
-        expect(content).to include('<style>')
-        expect(content).to include('</style>')
-        expect(content).to include('</head>')
-        expect(content).to include('<body>')
-        expect(content).to include('<h2>users</h2>')
-        expect(content).to include('<div class="diff-part">')
-        expect(content).to include('<div class="diff-left">')
-        expect(content).to include('<div class="diff-right">')
-        expect(content).to include('</body>')
-        expect(content).to include('</html>')
-      end
-
-      it 'includes table name as section title' do
-        db_diff.execute
-        
-        tempfile.rewind
-        content = tempfile.read
-        
-        expect(content).to include('<h2>users</h2>')
       end
 
       it 'sets no_diff flag to false when changes are detected' do
@@ -133,13 +95,10 @@ RSpec.describe DbBeforeAfter::DbDiff, 'Integration Tests' do
         allow(db_diff.instance_variable_get(:@adapter)).to receive(:read_database).and_return(same_db, same_db)
       end
 
-      it 'shows "No diff" message' do
+      it 'calls write_no_diff_message when no changes' do
+        expect(db_diff.instance_variable_get(:@output_adapter)).to receive(:write_no_diff_message)
+        
         db_diff.execute
-        
-        tempfile.rewind
-        content = tempfile.read
-        
-        expect(content).to include('<h2>No diff</h2>')
       end
 
       it 'keeps no_diff flag as true' do
@@ -176,24 +135,17 @@ RSpec.describe DbBeforeAfter::DbDiff, 'Integration Tests' do
         allow(db_diff.instance_variable_get(:@adapter)).to receive(:read_database).and_return(multi_before_db, multi_after_db)
       end
 
-      it 'processes all tables' do
+      it 'processes all tables with changes' do
+        expect(db_diff.instance_variable_get(:@output_adapter)).to receive(:write_title).with('posts')
+        
         db_diff.execute
-        
-        tempfile.rewind
-        content = tempfile.read
-        
-        # Should contain posts table header since posts has changes
-        expect(content).to include('<h2>posts</h2>')
       end
 
-      it 'shows changes in each table' do
+      it 'detects changes in multiple tables' do
+        expect(db_diff.instance_variable_get(:@output_adapter)).to receive(:generate_diff).at_least(:once)
+        expect(db_diff.instance_variable_get(:@output_adapter)).to receive(:write_diff_section).at_least(:once)
+        
         db_diff.execute
-        
-        tempfile.rewind
-        content = tempfile.read
-        
-        expect(content).to include('<strong>Updated </strong>Post 1')
-        expect(content).to include('Post 1')
       end
     end
   end

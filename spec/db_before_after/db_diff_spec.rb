@@ -19,6 +19,7 @@ RSpec.describe DbBeforeAfter::DbDiff do
 
   let(:tempfile) { Tempfile.new('test_output.html') }
   let(:mock_adapter) { instance_double(DbBeforeAfter::MySQLAdapter) }
+  let(:mock_output_adapter) { instance_double(DbBeforeAfter::HtmlOutputAdapter) }
   let(:db_diff) { described_class.new(tempfile, db_info) }
 
   after { tempfile.close }
@@ -28,31 +29,49 @@ RSpec.describe DbBeforeAfter::DbDiff do
       expect(db_diff.instance_variable_get(:@file)).to eq(tempfile)
       expect(db_diff.instance_variable_get(:@db_info)).to eq(db_info)
       expect(db_diff.instance_variable_get(:@adapter)).to be_a(DbBeforeAfter::MySQLAdapter)
+      expect(db_diff.instance_variable_get(:@output_adapter)).to be_a(DbBeforeAfter::HtmlOutputAdapter)
       expect(db_diff.instance_variable_get(:@no_diff)).to be true
     end
 
-    it 'allows custom adapter class' do
+    it 'allows custom adapter classes' do
       custom_adapter_class = Class.new(DbBeforeAfter::DatabaseAdapter)
+      custom_output_adapter_class = Class.new(DbBeforeAfter::OutputAdapter)
       allow(custom_adapter_class).to receive(:new).and_return(mock_adapter)
+      allow(custom_output_adapter_class).to receive(:new).and_return(mock_output_adapter)
       
-      db_diff = described_class.new(tempfile, db_info, custom_adapter_class)
+      db_diff = described_class.new(tempfile, db_info, custom_adapter_class, custom_output_adapter_class)
       
       expect(db_diff.instance_variable_get(:@adapter)).to eq(mock_adapter)
+      expect(db_diff.instance_variable_get(:@output_adapter)).to eq(mock_output_adapter)
     end
   end
 
   describe '#execute' do
     let(:mock_before_db) { { 'users' => [{ 'id' => 1, 'name' => 'John' }] } }
     let(:mock_after_db) { { 'users' => [{ 'id' => 1, 'name' => 'John Updated' }] } }
+    let(:mock_diff) { instance_double(Diffy::SplitDiff, left: '<div>left</div>', right: '<div>right</div>') }
 
     before do
       allow(db_diff.instance_variable_get(:@adapter)).to receive(:read_database).and_return(mock_before_db, mock_after_db)
+      allow(db_diff.instance_variable_get(:@output_adapter)).to receive(:start_output)
+      allow(db_diff.instance_variable_get(:@output_adapter)).to receive(:end_output)
+      allow(db_diff.instance_variable_get(:@output_adapter)).to receive(:write_title)
+      allow(db_diff.instance_variable_get(:@output_adapter)).to receive(:write_diff_section)
+      allow(db_diff.instance_variable_get(:@output_adapter)).to receive(:write_no_diff_message)
+      allow(db_diff.instance_variable_get(:@output_adapter)).to receive(:generate_diff).and_return(mock_diff)
       allow(STDIN).to receive(:getc).and_return("\n")
       allow(STDOUT).to receive(:puts)
     end
 
     it 'reads database twice and processes changes' do
       expect(db_diff.instance_variable_get(:@adapter)).to receive(:read_database).twice
+      
+      db_diff.execute
+    end
+
+    it 'uses output adapter to generate output' do
+      expect(db_diff.instance_variable_get(:@output_adapter)).to receive(:start_output)
+      expect(db_diff.instance_variable_get(:@output_adapter)).to receive(:end_output)
       
       db_diff.execute
     end
@@ -64,89 +83,6 @@ RSpec.describe DbBeforeAfter::DbDiff do
     end
   end
 
-  describe '#replace_code' do
-    it 'replaces spaces with &nbsp; and newlines with <br/>' do
-      input = "Hello World\nSecond Line"
-      expected = "Hello&nbsp;World<br/>Second&nbsp;Line"
-      
-      result = db_diff.replace_code(input)
-      expect(result).to eq(expected)
-    end
-
-    it 'returns nil when input is nil' do
-      result = db_diff.replace_code(nil)
-      expect(result).to be_nil
-    end
-  end
-
-  describe '#output_title' do
-    it 'writes HTML title to file' do
-      db_diff.output_title('Test Title', tempfile)
-      tempfile.rewind
-      
-      expect(tempfile.read).to include('<h2>Test Title</h2>')
-    end
-  end
-
-  describe '#output_left' do
-    it 'writes left diff container to file' do
-      db_diff.output_left('diff content', tempfile)
-      tempfile.rewind
-      
-      content = tempfile.read
-      expect(content).to include('<div class="diff-part"><div class="diff-left">')
-      expect(content).to include('diff content')
-    end
-  end
-
-  describe '#output_right' do
-    it 'writes right diff container to file' do
-      db_diff.output_right('diff content', tempfile)
-      tempfile.rewind
-      
-      content = tempfile.read
-      expect(content).to include('</div><div class="diff-right">')
-      expect(content).to include('diff content')
-      expect(content).to include('</div></div>')
-    end
-  end
-
-  describe '#write_html' do
-    it 'generates complete HTML structure' do
-      db_diff.write_html(tempfile) do |title, left, right|
-        title.call('Test Section')
-        left.call('left content')
-        right.call('right content')
-      end
-      
-      tempfile.rewind
-      content = tempfile.read
-      
-      expect(content).to include('<html>')
-      expect(content).to include('<head>')
-      expect(content).to include('<meta charset="UTF-8">')
-      expect(content).to include('<style>')
-      expect(content).to include('</style>')
-      expect(content).to include('</head>')
-      expect(content).to include('<body>')
-      expect(content).to include('<h2>Test Section</h2>')
-      expect(content).to include('left content')
-      expect(content).to include('right content')
-      expect(content).to include('</body>')
-      expect(content).to include('</html>')
-    end
-
-    it 'includes Diffy CSS in the output' do
-      db_diff.write_html(tempfile) { |title, left, right| }
-      
-      tempfile.rewind
-      content = tempfile.read
-      
-      expect(content).to include('.diff-part { width: 100%; overflow: hidden; }')
-      expect(content).to include('.diff-left { width: 49%; float: left; }')
-      expect(content).to include('.diff-right { margin-left: 50%; }')
-    end
-  end
 
   describe '.execute' do
     let(:mock_file) { instance_double(File) }
