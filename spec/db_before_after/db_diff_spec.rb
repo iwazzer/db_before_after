@@ -4,6 +4,7 @@ require 'spec_helper'
 require 'tempfile'
 require 'json'
 require 'time'
+require 'pathname'
 
 RSpec.describe DbBeforeAfter::DbDiff do
   let(:db_info) do
@@ -22,7 +23,7 @@ RSpec.describe DbBeforeAfter::DbDiff do
   let(:mock_output_adapter) { instance_double(DbBeforeAfter::HtmlOutputAdapter) }
   let(:db_diff) { described_class.new(tempfile, db_info) }
 
-  after { tempfile.close }
+  after { tempfile.close if defined?(tempfile) && tempfile.respond_to?(:close) }
 
   describe '#initialize' do
     it 'sets instance variables correctly' do
@@ -85,6 +86,8 @@ RSpec.describe DbBeforeAfter::DbDiff do
 
 
   describe '.execute' do
+    # Override the top-level let to avoid conflicts with File.open mocking
+    let(:tempfile) { nil }
     let(:mock_file) { instance_double(File) }
     let(:mock_db_diff) { instance_double(DbBeforeAfter::DbDiff) }
     let(:mock_ulid) { 'test_ulid' }

@@ -3,6 +3,7 @@
 require 'ulid'
 require 'json'
 require 'clipboard'
+require 'pathname'
 require_relative 'mysql_adapter'
 require_relative 'html_output_adapter'
 
@@ -52,20 +53,25 @@ module DbBeforeAfter
         changed_ids = (before.keys & after.keys).select { |id| before[id] != after[id] }
         @no_diff = false if deleted_ids.any? || added_ids.any? || changed_ids.any?
         
-        all_ids.each do |id|
-          lj, rj = if deleted_ids.include?(id)
-                     [before[id], '']
-                   elsif added_ids.include?(id)
-                     ['', after[id]]
-                   elsif changed_ids.include?(id)
-                     [before[id], after[id]]
-                   else
-                     next
-                   end
-          
-          diff = @output_adapter.generate_diff(lj, rj)
+        if deleted_ids.any? || added_ids.any? || changed_ids.any?
           @output_adapter.write_title(table_name)
-          @output_adapter.write_diff_section(diff.left, diff.right)
+          
+          all_ids.each do |id|
+            lj, rj = if deleted_ids.include?(id)
+                       [before[id], '']
+                     elsif added_ids.include?(id)
+                       ['', after[id]]
+                     elsif changed_ids.include?(id)
+                       [before[id], after[id]]
+                     else
+                       next
+                     end
+            
+            diff = @output_adapter.generate_diff(lj, rj)
+            @output_adapter.write_diff_section(diff.left, diff.right)
+          end
+          
+          @output_adapter.close_section if @output_adapter.respond_to?(:close_section)
         end
       end
       
