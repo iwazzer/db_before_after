@@ -7,9 +7,10 @@ A Ruby gem that visualizes database changes before and after executing a use cas
 - 📊 **Visual Diff Reports**: Side-by-side HTML comparison of database changes
 - 🎯 **Smart Detection**: Automatically detects added, deleted, and modified records
 - 🔍 **All Tables**: Scans all tables in your database for changes
-- 📋 **Clipboard Integration**: Automatically copies output file path to clipboard
+- 📋 **Clipboard Integration**: Automatically copies output file path to clipboard (macOS)
 - 🏷️ **Unique Output**: Uses ULID for unique file naming
-- 🎨 **Styled Output**: Beautiful HTML output with CSS styling
+- 🌙 **Dark Mode**: Automatic dark mode support based on system preferences
+- 🔧 **Extensible**: Adapter pattern for database engines and output formats
 
 ## Installation
 
@@ -97,6 +98,19 @@ export DB_ENCODING=utf8
    open /tmp/01HG9TSFDH83E4YTZQX0PVJ5Q8_db_diff.html
    ```
 
+## Example Output
+
+Here's what the generated HTML diff report looks like:
+
+![DB Before After Output](docs/images/db_diff_output.gif)
+
+The tool generates a comprehensive HTML report that shows:
+
+- **Side-by-side comparison** of database changes
+- **Clear visual indicators** for additions, deletions, and modifications
+- **Dark mode support** that automatically adapts to system preferences
+- **JSON-formatted data** for easy reading and analysis
+
 ## Output Format
 
 The tool generates an HTML file with:
@@ -105,38 +119,7 @@ The tool generates an HTML file with:
 - **Color-coded changes**: Green for additions, red for deletions
 - **JSON formatted records** for easy reading
 - **Table-by-table organization**
-- **Responsive design** for easy viewing
-
-### Sample Output
-
-```html
-<h2>users</h2>
-<div class="diff-part">
-  <div class="diff-left">
-    <!-- Before state -->
-    {
-      "id": "1",
-      "name": "John",
-      "email": "john@example.com"
-    }
-  </div>
-  <div class="diff-right">
-    <!-- After state -->
-    {
-      "id": "1",
-      "name": "John Updated",
-      "email": "john@example.com"
-    }
-  </div>
-</div>
-```
-
-## Supported Data Types
-
-- **Strings**: Direct comparison
-- **Numbers**: Direct comparison
-- **Datetime**: Formatted as `YYYY-MM-DD HH:MM:SS TZ`
-- **Blob/Binary**: MD5 hash comparison for large binary data
+- **Automatic handling** of different data types including binary data (MD5 hash)
 
 ## Requirements
 
@@ -191,9 +174,10 @@ The gem is available as open source under the terms of the [MIT License](https:/
 
 ### 0.1.0 (Current)
 
-- Initial release
-- MySQL database support
-- HTML diff report generation
-- Clipboard integration
+- Initial release with comprehensive features
+- MySQL database support with adapter pattern
+- HTML diff report generation with dark mode support
+- Database and output adapter architecture for extensibility
+- Clipboard integration for easy file access (macOS)
 - ULID-based unique file naming
-- Comprehensive test suite
+- Comprehensive test suite with 74 tests covering all functionality
