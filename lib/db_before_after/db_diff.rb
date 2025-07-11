@@ -3,9 +3,8 @@
 require 'diffy'
 require 'ulid'
 require 'json'
-require 'mysql2'
 require 'clipboard'
-require 'digest'
+require_relative 'mysql_adapter'
 
 module DbBeforeAfter
   class DbDiff
@@ -26,19 +25,20 @@ module DbBeforeAfter
       file.close if file
     end
 
-    def initialize(file, db_info)
+    def initialize(file, db_info, adapter_class = MySQLAdapter)
       @file = file
       @db_info = db_info
+      @adapter = adapter_class.new(db_info)
       @no_diff = true
     end
 
     def execute
       puts 'now reading db...'
-      before_db = read_db
+      before_db = @adapter.read_database
       puts 'run usecase now. then press any key when done.'
       STDIN.getc
       puts 'now reading db...'
-      after_db = read_db
+      after_db = @adapter.read_database
 
       write_html(@file) do |title, left, right|
         before_db.each do |table_name, records|
@@ -68,50 +68,6 @@ module DbBeforeAfter
         title.call('No diff') if @no_diff
         puts 'done.'
       end
-    end
-
-    def db_conn
-      @db_conn ||= Mysql2::Client.new(
-        host: ENV['DB_HOST'] || @db_info[:host],
-        username: ENV['DB_USERNAME'] || @db_info[:username],
-        password: ENV['DB_PASSWORD'] || @db_info[:password],
-        database: ENV['DB_DATABASE'] || @db_info[:database],
-        port: ENV['DB_PORT'] || @db_info[:port],
-        encoding: ENV['DB_ENCODING'] || @db_info[:encoding]
-      )
-    end
-
-    SELECT_TABLES = 'SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE table_schema = ?'.freeze
-    SELECT_COLUMNS = 'SELECT COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE table_schema = ? AND table_name = ?'.freeze
-
-    def read_db
-      db_data = []
-      @tables_stmt ||= db_conn.prepare(SELECT_TABLES)
-      tables = @tables_stmt.execute(@db_info[:database])
-      @columns_stmt ||= db_conn.prepare(SELECT_COLUMNS)
-      tables.each do |table|
-        table_name = table['TABLE_NAME']
-
-        columns = @columns_stmt.execute(@db_info[:database], table_name)
-
-        records = db_conn.query("SELECT * FROM #{table_name}")
-        rows = records.to_a.map do |row|
-          row.map do |k, v|
-            type_info = columns.map { |h| [h['COLUMN_NAME'], h['DATA_TYPE']]  }.to_h
-            value = case type_info[k]
-                    when /blob\Z/
-                      "MD5 Digest value: #{Digest::MD5.hexdigest(v)}"
-                    when 'datetime'
-                      v.strftime('%Y-%m-%d %H:%M:%S %Z') unless v.nil?
-                    else
-                      v.frozen? ? v.to_s : v.to_s.force_encoding(Encoding::UTF_8)
-                    end
-            [k, value]
-          end.to_h
-        end
-        db_data << [table_name,  rows]
-      end
-      db_data.to_h
     end
 
     def replace_code(str)

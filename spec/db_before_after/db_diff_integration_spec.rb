@@ -17,56 +17,37 @@ RSpec.describe DbBeforeAfter::DbDiff, 'Integration Tests' do
   end
 
   let(:tempfile) { Tempfile.new('test_output.html') }
+  let(:mock_adapter) { instance_double(DbBeforeAfter::MySQLAdapter) }
   let(:db_diff) { described_class.new(tempfile, db_info) }
 
   after { tempfile.close }
 
   describe '#execute' do
-    let(:mock_client) { instance_double(Mysql2::Client) }
-    let(:mock_tables_stmt) { instance_double(Mysql2::Statement) }
-    let(:mock_columns_stmt) { instance_double(Mysql2::Statement) }
-    
-    let(:before_tables) { [{ 'TABLE_NAME' => 'users' }] }
-    let(:before_columns) do
-      [
-        { 'COLUMN_NAME' => 'id', 'DATA_TYPE' => 'int' },
-        { 'COLUMN_NAME' => 'name', 'DATA_TYPE' => 'varchar' },
-        { 'COLUMN_NAME' => 'email', 'DATA_TYPE' => 'varchar' }
-      ]
-    end
-    let(:before_records) do
-      [
-        { 'id' => 1, 'name' => 'John', 'email' => 'john@example.com' },
-        { 'id' => 2, 'name' => 'Jane', 'email' => 'jane@example.com' }
-      ]
+    let(:before_db) do
+      {
+        'users' => [
+          { 'id' => 1, 'name' => 'John', 'email' => 'john@example.com' },
+          { 'id' => 2, 'name' => 'Jane', 'email' => 'jane@example.com' }
+        ]
+      }
     end
 
-    let(:after_records) do
-      [
-        { 'id' => 1, 'name' => 'John Updated', 'email' => 'john@example.com' },
-        { 'id' => 3, 'name' => 'Bob', 'email' => 'bob@example.com' }
-      ]
+    let(:after_db) do
+      {
+        'users' => [
+          { 'id' => 1, 'name' => 'John Updated', 'email' => 'john@example.com' },
+          { 'id' => 3, 'name' => 'Bob', 'email' => 'bob@example.com' }
+        ]
+      }
     end
 
     before do
-      allow(db_diff).to receive(:db_conn).and_return(mock_client)
-      allow(mock_client).to receive(:prepare).with(DbBeforeAfter::DbDiff::SELECT_TABLES).and_return(mock_tables_stmt)
-      allow(mock_client).to receive(:prepare).with(DbBeforeAfter::DbDiff::SELECT_COLUMNS).and_return(mock_columns_stmt)
-      allow(mock_tables_stmt).to receive(:execute).and_return(before_tables)
-      allow(mock_columns_stmt).to receive(:execute).and_return(before_columns)
-      
-      # Mock STDIN.getc to simulate user input
+      allow(db_diff.instance_variable_get(:@adapter)).to receive(:read_database).and_return(before_db, after_db)
       allow(STDIN).to receive(:getc).and_return("\n")
-      
-      # Mock puts to avoid output during tests
       allow(STDOUT).to receive(:puts)
     end
 
     context 'when there are database changes' do
-      before do
-        # First call returns before_records, second call returns after_records
-        allow(mock_client).to receive(:query).and_return(before_records, after_records)
-      end
 
       it 'detects added records' do
         db_diff.execute
@@ -139,9 +120,17 @@ RSpec.describe DbBeforeAfter::DbDiff, 'Integration Tests' do
     end
 
     context 'when there are no database changes' do
+      let(:same_db) do
+        {
+          'users' => [
+            { 'id' => 1, 'name' => 'John', 'email' => 'john@example.com' },
+            { 'id' => 2, 'name' => 'Jane', 'email' => 'jane@example.com' }
+          ]
+        }
+      end
+
       before do
-        # Both calls return the same records
-        allow(mock_client).to receive(:query).and_return(before_records, before_records)
+        allow(db_diff.instance_variable_get(:@adapter)).to receive(:read_database).and_return(same_db, same_db)
       end
 
       it 'shows "No diff" message' do
@@ -161,21 +150,30 @@ RSpec.describe DbBeforeAfter::DbDiff, 'Integration Tests' do
     end
 
     context 'with multiple tables' do
-      let(:multi_tables) { [{ 'TABLE_NAME' => 'users' }, { 'TABLE_NAME' => 'posts' }] }
-      let(:posts_columns) do
-        [
-          { 'COLUMN_NAME' => 'id', 'DATA_TYPE' => 'int' },
-          { 'COLUMN_NAME' => 'title', 'DATA_TYPE' => 'varchar' },
-          { 'COLUMN_NAME' => 'content', 'DATA_TYPE' => 'text' }
-        ]
+      let(:multi_before_db) do
+        {
+          'users' => [
+            { 'id' => 1, 'name' => 'John', 'email' => 'john@example.com' }
+          ],
+          'posts' => [
+            { 'id' => 1, 'title' => 'Post 1', 'content' => 'Content 1' }
+          ]
+        }
       end
-      let(:posts_before) { [{ 'id' => 1, 'title' => 'Post 1', 'content' => 'Content 1' }] }
-      let(:posts_after) { [{ 'id' => 1, 'title' => 'Updated Post 1', 'content' => 'Content 1' }] }
+
+      let(:multi_after_db) do
+        {
+          'users' => [
+            { 'id' => 1, 'name' => 'John', 'email' => 'john@example.com' }
+          ],
+          'posts' => [
+            { 'id' => 1, 'title' => 'Updated Post 1', 'content' => 'Content 1' }
+          ]
+        }
+      end
 
       before do
-        allow(mock_tables_stmt).to receive(:execute).and_return(multi_tables)
-        allow(mock_columns_stmt).to receive(:execute).and_return(before_columns, posts_columns, before_columns, posts_columns)
-        allow(mock_client).to receive(:query).and_return(before_records, posts_before, before_records, posts_after)
+        allow(db_diff.instance_variable_get(:@adapter)).to receive(:read_database).and_return(multi_before_db, multi_after_db)
       end
 
       it 'processes all tables' do
@@ -201,26 +199,13 @@ RSpec.describe DbBeforeAfter::DbDiff, 'Integration Tests' do
   end
 
   describe 'Error handling' do
-    context 'when database connection fails' do
+    context 'when database reading fails' do
       before do
-        allow(db_diff).to receive(:db_conn).and_raise(Mysql2::Error, 'Connection failed')
+        allow(db_diff.instance_variable_get(:@adapter)).to receive(:read_database).and_raise(StandardError, 'Database read failed')
       end
 
       it 'raises the database error' do
-        expect { db_diff.execute }.to raise_error(Mysql2::Error, 'Connection failed')
-      end
-    end
-
-    context 'when query execution fails' do
-      let(:mock_client) { instance_double(Mysql2::Client) }
-
-      before do
-        allow(db_diff).to receive(:db_conn).and_return(mock_client)
-        allow(mock_client).to receive(:prepare).and_raise(Mysql2::Error, 'Query failed')
-      end
-
-      it 'raises the query error' do
-        expect { db_diff.execute }.to raise_error(Mysql2::Error, 'Query failed')
+        expect { db_diff.execute }.to raise_error(StandardError, 'Database read failed')
       end
     end
   end

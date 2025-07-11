@@ -18,6 +18,7 @@ RSpec.describe DbBeforeAfter::DbDiff do
   end
 
   let(:tempfile) { Tempfile.new('test_output.html') }
+  let(:mock_adapter) { instance_double(DbBeforeAfter::MySQLAdapter) }
   let(:db_diff) { described_class.new(tempfile, db_info) }
 
   after { tempfile.close }
@@ -26,116 +27,40 @@ RSpec.describe DbBeforeAfter::DbDiff do
     it 'sets instance variables correctly' do
       expect(db_diff.instance_variable_get(:@file)).to eq(tempfile)
       expect(db_diff.instance_variable_get(:@db_info)).to eq(db_info)
+      expect(db_diff.instance_variable_get(:@adapter)).to be_a(DbBeforeAfter::MySQLAdapter)
       expect(db_diff.instance_variable_get(:@no_diff)).to be true
     end
-  end
 
-  describe '#db_conn' do
-    let(:mock_client) { instance_double(Mysql2::Client) }
-
-    before do
-      allow(Mysql2::Client).to receive(:new).and_return(mock_client)
-    end
-
-    it 'creates a new MySQL client with correct parameters' do
-      expect(Mysql2::Client).to receive(:new).with(
-        host: '127.0.0.1',
-        username: 'test_user',
-        password: 'test_pass',
-        database: 'test_db',
-        port: 3306,
-        encoding: 'utf8'
-      )
-
-      db_diff.db_conn
-    end
-
-    it 'returns the same client instance on subsequent calls' do
-      first_call = db_diff.db_conn
-      second_call = db_diff.db_conn
+    it 'allows custom adapter class' do
+      custom_adapter_class = Class.new(DbBeforeAfter::DatabaseAdapter)
+      allow(custom_adapter_class).to receive(:new).and_return(mock_adapter)
       
-      expect(first_call).to eq(second_call)
-    end
-
-    context 'when environment variables are set' do
-      before do
-        allow(ENV).to receive(:[]).and_call_original
-        allow(ENV).to receive(:[]).with('DB_HOST').and_return('env_host')
-        allow(ENV).to receive(:[]).with('DB_USERNAME').and_return('env_user')
-        allow(ENV).to receive(:[]).with('DB_PASSWORD').and_return('env_pass')
-        allow(ENV).to receive(:[]).with('DB_DATABASE').and_return('env_db')
-        allow(ENV).to receive(:[]).with('DB_PORT').and_return('3307')
-        allow(ENV).to receive(:[]).with('DB_ENCODING').and_return('utf8mb4')
-      end
-
-      it 'uses environment variables over db_info' do
-        expect(Mysql2::Client).to receive(:new).with(
-          host: 'env_host',
-          username: 'env_user',
-          password: 'env_pass',
-          database: 'env_db',
-          port: '3307',
-          encoding: 'utf8mb4'
-        )
-
-        db_diff.db_conn
-      end
+      db_diff = described_class.new(tempfile, db_info, custom_adapter_class)
+      
+      expect(db_diff.instance_variable_get(:@adapter)).to eq(mock_adapter)
     end
   end
 
-  describe '#read_db' do
-    let(:mock_client) { instance_double(Mysql2::Client) }
-    let(:mock_tables_stmt) { instance_double(Mysql2::Statement) }
-    let(:mock_columns_stmt) { instance_double(Mysql2::Statement) }
-    let(:mock_tables_result) { [{ 'TABLE_NAME' => 'users' }, { 'TABLE_NAME' => 'posts' }] }
-    let(:mock_columns_result) do
-      [
-        { 'COLUMN_NAME' => 'id', 'DATA_TYPE' => 'int' },
-        { 'COLUMN_NAME' => 'name', 'DATA_TYPE' => 'varchar' },
-        { 'COLUMN_NAME' => 'created_at', 'DATA_TYPE' => 'datetime' }
-      ]
-    end
-    let(:mock_records_result) do
-      [
-        { 'id' => 1, 'name' => 'John', 'created_at' => Time.parse('2023-01-01 10:00:00') },
-        { 'id' => 2, 'name' => 'Jane', 'created_at' => Time.parse('2023-01-02 11:00:00') }
-      ]
-    end
+  describe '#execute' do
+    let(:mock_before_db) { { 'users' => [{ 'id' => 1, 'name' => 'John' }] } }
+    let(:mock_after_db) { { 'users' => [{ 'id' => 1, 'name' => 'John Updated' }] } }
 
     before do
-      allow(db_diff).to receive(:db_conn).and_return(mock_client)
-      allow(mock_client).to receive(:prepare).with(DbBeforeAfter::DbDiff::SELECT_TABLES).and_return(mock_tables_stmt)
-      allow(mock_client).to receive(:prepare).with(DbBeforeAfter::DbDiff::SELECT_COLUMNS).and_return(mock_columns_stmt)
-      allow(mock_tables_stmt).to receive(:execute).and_return(mock_tables_result)
-      allow(mock_columns_stmt).to receive(:execute).and_return(mock_columns_result)
-      allow(mock_client).to receive(:query).and_return(mock_records_result)
+      allow(db_diff.instance_variable_get(:@adapter)).to receive(:read_database).and_return(mock_before_db, mock_after_db)
+      allow(STDIN).to receive(:getc).and_return("\n")
+      allow(STDOUT).to receive(:puts)
     end
 
-    it 'returns database structure as hash' do
-      result = db_diff.read_db
-
-      expect(result).to be_a(Hash)
-      expect(result.keys).to contain_exactly('users', 'posts')
+    it 'reads database twice and processes changes' do
+      expect(db_diff.instance_variable_get(:@adapter)).to receive(:read_database).twice
+      
+      db_diff.execute
     end
 
-    it 'formats datetime fields correctly' do
-      result = db_diff.read_db
-      user_record = result['users'].first
-
-      expect(user_record['created_at']).to eq('2023-01-01 10:00:00 JST')
-    end
-
-    it 'handles blob fields with MD5 digest' do
-      blob_columns = [{ 'COLUMN_NAME' => 'data', 'DATA_TYPE' => 'blob' }]
-      blob_records = [{ 'data' => 'binary_data' }]
-
-      allow(mock_columns_stmt).to receive(:execute).and_return(blob_columns)
-      allow(mock_client).to receive(:query).and_return(blob_records)
-
-      result = db_diff.read_db
-      record = result['users'].first
-
-      expect(record['data']).to match(/^MD5 Digest value: [a-f0-9]{32}$/)
+    it 'detects changes and sets no_diff flag appropriately' do
+      db_diff.execute
+      
+      expect(db_diff.instance_variable_get(:@no_diff)).to be false
     end
   end
 
